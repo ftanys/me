@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能汇率换算器</title>
+    <style>
+        :root {
+            --primary-color: #007aff;
+            --background-color: #f0f2f5;
+            --card-background: #ffffff;
+            --text-color: #1d1d1f;
+            --secondary-text-color: #6e6e73;
+            --border-color: #dcdcdc;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            margin: 0;
+            padding-top: 2rem;
+            background-color: var(--background-color);
+            color: var(--text-color);
+        }
+        #app-container {
+            width: 95%;
+            max-width: 500px;
+        }
+        #converter {
+            background: var(--card-background);
+            padding: 1.5rem 2rem;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            margin-top: 0;
+            margin-bottom: 1.5rem;
+            color: var(--primary-color);
+            font-size: 1.8rem;
+        }
+        .currency-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1rem;
+            position: relative;
+        }
+        .currency-label {
+            flex-basis: 70px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        .currency-input {
+            flex-grow: 1;
+            padding: 0.8rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 1.3rem;
+            text-align: right;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            -moz-appearance: textfield;
+        }
+        .currency-input::-webkit-outer-spin-button,
+        .currency-input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        .currency-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2);
+        }
+        .remove-btn {
+            background: transparent;
+            border: none;
+            color: #ff453a;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0.5rem;
+            margin-left: 0.5rem;
+            line-height: 1;
+            opacity: 0.5;
+            transition: opacity 0.2s;
+        }
+        .currency-row:hover .remove-btn {
+            opacity: 1;
+        }
+        #add-currency-section {
+            margin-top: 2rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+        #currency-select {
+            flex-grow: 1;
+            padding: 0.8rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            font-size: 1rem;
+        }
+        #add-btn {
+            padding: 0.8rem 1.2rem;
+            border: none;
+            background-color: var(--primary-color);
+            color: white;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        #add-btn:hover {
+            background-color: #0056b3;
+        }
+        #status {
+            text-align: center;
+            margin-top: 1.5rem;
+            font-size: 0.85rem;
+            color: var(--secondary-text-color);
+        }
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+    <div id="converter">
+        <h1>智能汇率换算器</h1>
+        <div id="currency-container"></div>
+        <div id="add-currency-section">
+            <select id="currency-select"></select>
+            <button id="add-btn">添加</button>
+        </div>
+        <p id="status">正在初始化...</p>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const apiKey = "76d6e18a4eb48a506e34eb00";
+    const apiUrl = `https://v6.exchangerate-api.com/v6/${apiKey}`;
+
+    const container = document.getElementById('currency-container' );
+    const statusElem = document.getElementById('status');
+    const currencySelect = document.getElementById('currency-select');
+    const addBtn = document.getElementById('add-btn');
+
+    let rates = {};
+    let supportedCodes = [];
+    let activeCurrencies = [];
+
+    // 从本地存储加载用户选择的货币列表，或使用默认值
+    function loadActiveCurrencies() {
+        const saved = localStorage.getItem('activeCurrencies');
+        activeCurrencies = saved ? JSON.parse(saved) : ["USD", "CNY", "PHP"];
+    }
+
+    // 保存货币列表到本地存储
+    function saveActiveCurrencies() {
+        localStorage.setItem('activeCurrencies', JSON.stringify(activeCurrencies));
+    }
+
+    // 渲染整个换算器界面
+    function renderConverter() {
+        container.innerHTML = '';
+        activeCurrencies.forEach(code => {
+            const row = document.createElement('div');
+            row.className = 'currency-row';
+            row.innerHTML = `
+                <label class="currency-label">${code}</label>
+                <input type="number" class="currency-input" data-currency="${code}" placeholder="0.00">
+                <button class="remove-btn" data-currency="${code}">&times;</button>
+            `;
+            container.appendChild(row);
+        });
+        updateSelectOptions();
+    }
+
+    // 更新下拉选择框的选项
+    function updateSelectOptions() {
+        currencySelect.innerHTML = '';
+        const available = supportedCodes.filter(code => !activeCurrencies.includes(code[0]));
+        available.forEach(code => {
+            const option = document.createElement('option');
+            option.value = code[0];
+            option.textContent = `${code[0]} - ${code[1]}`;
+            currencySelect.appendChild(option);
+        });
+    }
+
+    // 处理输入和计算
+    function handleInput(event) {
+        const sourceInput = event.target;
+        if (!sourceInput.classList.contains('currency-input')) return;
+
+        const sourceCurrency = sourceInput.dataset.currency;
+        const sourceValue = parseFloat(sourceInput.value);
+        const allInputs = container.querySelectorAll('.currency-input');
+
+        if (isNaN(sourceValue) || sourceValue === 0) {
+            allInputs.forEach(input => {
+                if (input !== sourceInput) input.value = '';
+            });
+            return;
+        }
+
+        const baseValue = sourceValue / rates[sourceCurrency];
+
+        allInputs.forEach(input => {
+            if (input !== sourceInput) {
+                const targetCurrency = input.dataset.currency;
+                const targetValue = baseValue * rates[targetCurrency];
+                input.value = targetValue.toFixed(2);
+            }
+        });
+    }
+    
+    // 处理添加和删除货币
+    function handleModifyCurrencies(event) {
+        const target = event.target;
+        if (target.id === 'add-btn') {
+            const newCurrency = currencySelect.value;
+            if (newCurrency && !activeCurrencies.includes(newCurrency)) {
+                activeCurrencies.push(newCurrency);
+                saveActiveCurrencies();
+                renderConverter();
+            }
+        } else if (target.classList.contains('remove-btn')) {
+            const currencyToRemove = target.dataset.currency;
+            activeCurrencies = activeCurrencies.filter(c => c !== currencyToRemove);
+            saveActiveCurrencies();
+            renderConverter();
+        }
+    }
+
+    // 初始化应用
+    async function init() {
+        loadActiveCurrencies();
+        try {
+            statusElem.textContent = '正在加载汇率数据...';
+            
+            // 获取支持的货币代码列表
+            const codesResponse = await fetch(`${apiUrl}/codes`);
+            const codesData = await codesResponse.json();
+            if (codesData.result === 'error') throw new Error(codesData['error-type']);
+            supportedCodes = codesData.supported_codes;
+
+            // 获取最新的汇率 (以USD为基准)
+            const ratesResponse = await fetch(`${apiUrl}/latest/USD`);
+            const ratesData = await ratesResponse.json();
+            if (ratesData.result === 'error') throw new Error(ratesData['error-type']);
+            
+            rates = ratesData.conversion_rates;
+            const updateTime = new Date(ratesData.time_last_update_utc).toLocaleString();
+            statusElem.textContent = `汇率更新于: ${updateTime}`;
+            
+            renderConverter();
+
+        } catch (error) {
+            console.error("初始化失败:", error);
+            statusElem.textContent = `加载失败: ${error.message}。请检查网络或API密钥。`;
+        }
+    }
+
+    container.addEventListener('input', handleInput);
+    document.getElementById('add-currency-section').addEventListener('click', handleModifyCurrencies);
+    
+    init();
+});
+</script>
+
+</body>
+</html>
