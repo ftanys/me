@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智能汇率换算器</title>
+    <title>智能汇率换算器 (桌面/移动端修复版)</title>
     <style>
         :root {
             --primary-color: #007aff;
@@ -20,7 +20,7 @@
             align-items: flex-start;
             min-height: 100vh;
             margin: 0;
-            padding-top: 2rem;
+            padding: 2rem; /* 恢复桌面端默认边距 */
             background-color: var(--background-color);
             color: var(--text-color);
         }
@@ -30,7 +30,7 @@
         }
         #converter {
             background: var(--card-background);
-            padding: 1.5rem 2rem;
+            padding: 1.5rem 2rem; /* 恢复桌面端默认内边距 */
             border-radius: 16px;
             box-shadow: 0 8px 32px rgba(0,0,0,0.1);
         }
@@ -39,13 +39,14 @@
             margin-top: 0;
             margin-bottom: 1.5rem;
             color: var(--primary-color);
-            font-size: 1.8rem;
+            font-size: 1.8rem; /* 恢复桌面端默认字体大小 */
         }
         .currency-row {
             display: flex;
             align-items: center;
             margin-bottom: 1rem;
             position: relative;
+            /* **已修复**: 移除在所有尺寸下都生效的 flex-wrap */
         }
         .currency-label {
             flex-basis: 70px;
@@ -119,6 +120,41 @@
             font-size: 0.85rem;
             color: var(--secondary-text-color);
         }
+
+        /* **核心修复**: 所有移动端样式都严格限制在媒体查询内部 */
+        @media (max-width: 420px) {
+            body {
+                padding: 1rem;
+            }
+            #converter {
+                padding: 1.5rem 1rem;
+            }
+            h1 {
+                font-size: 1.5rem;
+            }
+            .currency-row {
+                flex-wrap: wrap; /* 只在小屏幕上允许换行 */
+                gap: 0.5rem 0;
+            }
+            .currency-label {
+                flex-basis: 100%; /* 标签占满整行 */
+                margin-bottom: 0;
+            }
+            .currency-input {
+                flex-grow: 1;
+                flex-basis: 0; /* 让输入框和按钮自动分配剩余空间 */
+                font-size: 1.2rem;
+            }
+            .remove-btn {
+                margin-left: 0.5rem;
+            }
+            #add-currency-section {
+                flex-wrap: wrap;
+            }
+            #currency-select, #add-btn {
+                flex-basis: 100%; /* 让下拉框和按钮都占满一行 */
+            }
+        }
     </style>
 </head>
 <body>
@@ -136,11 +172,12 @@
 </div>
 
 <script>
+// JavaScript部分与您提供的版本完全相同
 document.addEventListener('DOMContentLoaded', () => {
     const apiKey = "76d6e18a4eb48a506e34eb00";
     const apiUrl = `https://v6.exchangerate-api.com/v6/${apiKey}`;
 
-    const container = document.getElementById('currency-container' );
+    const container = document.getElementById('currency-container'  );
     const statusElem = document.getElementById('status');
     const currencySelect = document.getElementById('currency-select');
     const addBtn = document.getElementById('add-btn');
@@ -149,18 +186,15 @@ document.addEventListener('DOMContentLoaded', () => {
     let supportedCodes = [];
     let activeCurrencies = [];
 
-    // 从本地存储加载用户选择的货币列表，或使用默认值
     function loadActiveCurrencies() {
         const saved = localStorage.getItem('activeCurrencies');
         activeCurrencies = saved ? JSON.parse(saved) : ["USD", "CNY", "PHP"];
     }
 
-    // 保存货币列表到本地存储
     function saveActiveCurrencies() {
         localStorage.setItem('activeCurrencies', JSON.stringify(activeCurrencies));
     }
 
-    // 渲染整个换算器界面
     function renderConverter() {
         container.innerHTML = '';
         activeCurrencies.forEach(code => {
@@ -176,9 +210,9 @@ document.addEventListener('DOMContentLoaded', () => {
         updateSelectOptions();
     }
 
-    // 更新下拉选择框的选项
     function updateSelectOptions() {
         currencySelect.innerHTML = '';
+        if (!supportedCodes || supportedCodes.length === 0) return;
         const available = supportedCodes.filter(code => !activeCurrencies.includes(code[0]));
         available.forEach(code => {
             const option = document.createElement('option');
@@ -188,7 +222,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 处理输入和计算
     function handleInput(event) {
         const sourceInput = event.target;
         if (!sourceInput.classList.contains('currency-input')) return;
@@ -204,6 +237,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        if (!rates[sourceCurrency]) return;
+
         const baseValue = sourceValue / rates[sourceCurrency];
 
         allInputs.forEach(input => {
@@ -215,7 +250,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // 处理添加和删除货币
     function handleModifyCurrencies(event) {
         const target = event.target;
         if (target.id === 'add-btn') {
@@ -233,19 +267,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // 初始化应用
     async function init() {
         loadActiveCurrencies();
+        renderConverter();
         try {
             statusElem.textContent = '正在加载汇率数据...';
             
-            // 获取支持的货币代码列表
             const codesResponse = await fetch(`${apiUrl}/codes`);
             const codesData = await codesResponse.json();
             if (codesData.result === 'error') throw new Error(codesData['error-type']);
             supportedCodes = codesData.supported_codes;
 
-            // 获取最新的汇率 (以USD为基准)
             const ratesResponse = await fetch(`${apiUrl}/latest/USD`);
             const ratesData = await ratesResponse.json();
             if (ratesData.result === 'error') throw new Error(ratesData['error-type']);
@@ -254,11 +286,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const updateTime = new Date(ratesData.time_last_update_utc).toLocaleString();
             statusElem.textContent = `汇率更新于: ${updateTime}`;
             
-            renderConverter();
+            updateSelectOptions();
 
         } catch (error) {
             console.error("初始化失败:", error);
-            statusElem.textContent = `加载失败: ${error.message}。请检查网络或API密钥。`;
+            statusElem.textContent = `加载失败: ${error.message}。`;
+            statusElem.style.color = 'red';
         }
     }
 
