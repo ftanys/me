@@ -1,1 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>多币种汇率换算（exchange2）</title>
+<style>
+  :root{--card-bg:#fff;--bg:#f6f8fa;--muted:#666;--accent:#006ef3;}
+  body{margin:0;font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:var(--bg); color:#222;}
+  .wrap{max-width:640px;margin:24px auto;padding:16px;}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+  h1{font-size:1.1rem;margin:0;}
+  .card{background:var(--card-bg);border-radius:12px;padding:18px;box-shadow:0 6px 18px rgba(15,23,42,0.06);}
+  .controls{display:flex;gap:8px;margin-bottom:12px;align-items:center;}
+  .edit-btn{background:var(--accent);color:#fff;border:0;padding:8px 12px;border-radius:10px;cursor:pointer;}
+  .small-btn{background:#eee;border:0;padding:6px 8px;border-radius:8px;cursor:pointer;}
+  .currency-list{display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:8px;}
+  .input-group{display:flex;flex-direction:column;align-items:stretch;}
+  label{font-weight:600;margin-bottom:6px;font-size:0.95rem;color:#1c2430}
+  input[type="number"]{padding:10px;border-radius:8px;border:1px solid #d9dde3;font-size:1rem;}
+  .updated{margin-top:12px;color:var(--muted);font-size:0.9rem;}
+  /* 编辑面板 */
+  .edit-panel{margin-top:12px;border-top:1px dashed #e6e9ee;padding-top:12px;display:none;}
+  .search-row{display:flex;gap:8px;margin-bottom:8px;}
+  .search-row input{flex:1;padding:8px;border-radius:8px;border:1px solid #d9dde3;}
+  .suggestions{max-height:220px;overflow:auto;border:1px solid #eef2f7;border-radius:8px;padding:6px;background:#fff;}
+  .suggest-item{display:flex;justify-content:space-between;align-items:center;padding:8px;border-radius:6px;cursor:pointer;}
+  .suggest-item:hover{background:#f5f8ff;}
+  .meta-small{font-size:0.85rem;color:var(--muted);}
+  .currency-row{display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fbfdff;border-radius:8px;}
+  .currency-row button{background:#ffdede;border:0;color:#a00;padding:6px 8px;border-radius:8px;cursor:pointer;}
+  .note{font-size:0.9rem;color:#444;margin-top:10px;}
+  @media (max-width:520px){.wrap{padding:12px;margin:12px;} .card{padding:12px}}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>exchange2 — 多币种汇率换算</h1>
+      <div style="font-size:0.9rem;color:var(--muted)">离线记忆 & API 实时汇率</div>
+    </header>
 
+    <div class="card">
+      <div class="controls">
+        <button class="edit-btn" id="toggleEditBtn">✏ 编辑币种</button>
+        <button class="small-btn" id="resetBtn" title="恢复到默认的 USD / PHP / CNY">恢复默认</button>
+        <div style="flex:1"></div>
+        <div id="statusHint" class="meta-small"></div>
+      </div>
+
+      <div id="currencyContainer" class="currency-list"></div>
+
+      <div class="updated" id="updatedTime">汇率加载中…</div>
+
+      <div class="edit-panel" id="editPanel">
+        <div class="note">通过 <strong>国家名 / 货币名 / 货币代码</strong> 搜索，支持模糊匹配。选中条目后点击 “添加”。</div>
+        <div class="search-row" style="margin-top:8px;">
+          <input id="searchCurrency" placeholder="搜索国家或货币（例如：Saudi、Mexi、Peso、AED、Mex）" />
+          <button class="small-btn" id="clearSearch">清除</button>
+        </div>
+        <div class="suggestions" id="suggestions"></div>
+
+        <h3 style="margin-top:12px;margin-bottom:6px">当前币种</h3>
+        <div id="currencyList"></div>
+        <div style="margin-top:10px;display:flex;gap:8px;">
+          <button class="edit-btn" id="saveBtn">保存设置</button>
+          <button class="small-btn" id="closeEdit">完成</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;margin-top:12px;color:var(--muted);font-size:0.9rem">
+      说明：数据来源 Frankfurter API（每日更新）。如需小时级更新可改用带 Key 的其他服务。
+    </div>
+  </div>
+
+<script>
+/*
+  说明：
+  - 使用 USD 作为“枢纽”汇率基准：从 API 获取 USD -> 其他 的牌价，然后用 (USD->B) / (USD->A) 计算 A->B。
+  - 编辑币种支持模糊搜索（国家名 / 货币名 / 代码），并在本地 localStorage 保存设置（浏览器记住）。
+*/
+
+const API_BASE = "https://api.frankfurter.app/latest";
+// 货币元数据（常见货币）——用于展示国家与货币名称并支持模糊搜索。可按需扩展。
+const currencyMeta = {
+  "USD": {"name":"United States Dollar","country":"United States","cn":"美元"},
+  "PHP": {"name":"Philippine Peso","country":"Philippines","cn":"菲律宾比索"},
+  "CNY": {"name":"Chinese Yuan","country":"China","cn":"人民币"},
+  "EUR": {"name":"Euro","country":"Eurozone","cn":"欧元"},
+  "GBP": {"name":"British Pound","country":"United Kingdom","cn":"英镑"},
+  "JPY": {"name":"Japanese Yen","country":"Japan","cn":"日元"},
+  "AED": {"name":"UAE Dirham","country":"United Arab Emirates","cn":"阿联酋迪拉姆"},
+  "SAR": {"name":"Saudi Riyal","country":"Saudi Arabia","cn":"沙特里亚尔"},
+  "MXN": {"name":"Mexican Peso","country":"Mexico","cn":"墨西哥比索"},
+  "SGD": {"name":"Singapore Dollar","country":"Singapore","cn":"新加坡元"},
+  "THB": {"name":"Thai Baht","country":"Thailand","cn":"泰铢"},
+  "VND": {"name":"Vietnamese Dong","country":"Vietnam","cn":"越南盾"},
+  "IDR": {"name":"Indonesian Rupiah","country":"Indonesia","cn":"印尼盾"},
+  "MYR": {"name":"Malaysian Ringgit","country":"Malaysia","cn":"马来西亚林吉特"},
+  "INR": {"name":"Indian Rupee","country":"India","cn":"印度卢比"},
+  "KRW": {"name":"South Korean Won","country":"South Korea","cn":"韩元"},
+  "AUD": {"name":"Australian Dollar","country":"Australia","cn":"澳元"},
+  "CAD": {"name":"Canadian Dollar","country":"Canada","cn":"加元"},
+  "CHF": {"name":"Swiss Franc","country":"Switzerland","cn":"瑞士法郎"},
+  "NZD": {"name":"New Zealand Dollar","country":"New Zealand","cn":"新西兰元"},
+  "ZAR": {"name":"South African Rand","country":"South Africa","cn":"南非兰特"},
+  "BRL": {"name":"Brazilian Real","country":"Brazil","cn":"巴西雷亚尔"},
+  "RUB": {"name":"Russian Ruble","country":"Russia","cn":"俄罗斯卢布"},
+  "TRY": {"name":"Turkish Lira","country":"Turkey","cn":"土耳其里拉"},
+  "ILS": {"name":"Israeli Shekel","country":"Israel","cn":"以色列谢克尔"},
+  "HKD": {"name":"Hong Kong Dollar","country":"Hong Kong","cn":"港元"},
+  "TWD": {"name":"New Taiwan Dollar","country":"Taiwan","cn":"新台币"},
+  "SEK": {"name":"Swedish Krona","country":"Sweden","cn":"瑞典克朗"},
+  "NOK": {"name":"Norwegian Krone","country":"Norway","cn":"挪威克朗"},
+  "DKK": {"name":"Danish Krone","country":"Denmark","cn":"丹麦克朗"},
+  "PLN": {"name":"Polish Zloty","country":"Poland","cn":"波兰兹罗提"},
+  "HUF": {"name":"Hungarian Forint","country":"Hungary","cn":"匈牙利福林"},
+  "CZK": {"name":"Czech Koruna","country":"Czech Republic","cn":"捷克克朗"},
+  "ARS": {"name":"Argentine Peso","country":"Argentina","cn":"阿根廷比索"},
+  "CLP": {"name":"Chilean Peso","country":"Chile","cn":"智利比索"},
+  "COP": {"name":"Colombian Peso","country":"Colombia","cn":"哥伦比亚比索"},
+  "EGP": {"name":"Egyptian Pound","country":"Egypt","cn":"埃及镑"},
+  "KWD": {"name":"Kuwaiti Dinar","country":"Kuwait","cn":"科威特第纳尔"},
+  "QAR": {"name":"Qatari Riyal","country":"Qatar","cn":"卡塔尔里亚尔"},
+  "BHD": {"name":"Bahraini Dinar","country":"Bahrain","cn":"巴林第纳尔"},
+  "OMR": {"name":"Omani Rial","country":"Oman","cn":"阿曼里亚尔"},
+  "LBP": {"name":"Lebanese Pound","country":"Lebanon","cn":"黎巴嫩镑"},
+  "NGN": {"name":"Nigerian Naira","country":"Nigeria","cn":"奈拉"},
+  "PKR": {"name":"Pakistani Rupee","country":"Pakistan","cn":"巴基斯坦卢比"},
+  "BDT": {"name":"Bangladeshi Taka","country":"Bangladesh","cn":"孟加拉塔卡"},
+  "MMK": {"name":"Myanmar Kyat","country":"Myanmar","cn":"缅甸铢"},
+  "KES": {"name":"Kenyan Shilling","country":"Kenya","cn":"肯尼亚先令"},
+  "GHS": {"name":"Ghanaian Cedi","country":"Ghana","cn":"加纳塞地"},
+  "MAD": {"name":"Moroccan Dirham","country":"Morocco","cn":"摩洛哥迪拉姆"},
+  "DZD": {"name":"Algerian Dinar","country":"Algeria","cn":"阿尔及利亚第纳尔"},
+  "TND": {"name":"Tunisian Dinar","country":"Tunisia","cn":"突尼斯第纳尔"},
+  "PEN": {"name":"Peruvian Sol","country":"Peru","cn":"秘鲁索尔"},
+  "UAH": {"name":"Ukrainian Hryvnia","country":"Ukraine","cn":"乌克兰格里夫纳"},
+  "KZT": {"name":"Kazakhstani Tenge","country":"Kazakhstan","cn":"坚戈"},
+  "RON": {"name":"Romanian Leu","country":"Romania","cn":"罗马尼亚列伊"},
+  "ISK": {"name":"Icelandic Krona","country":"Iceland","cn":"冰岛克朗"},
+  "LKR": {"name":"Sri Lankan Rupee","country":"Sri Lanka","cn":"斯里兰卡卢比"},
+  "JOD": {"name":"Jordanian Dinar","country":"Jordan","cn":"约旦第纳尔"},
+  "BYN": {"name":"Belarusian Ruble","country":"Belarus","cn":"白俄罗斯卢布"},
+  "XOF": {"name":"CFA Franc BCEAO","country":"West Africa","cn":"西非法郎"},
+  "XAF": {"name":"CFA Franc BEAC","country":"Central Africa","cn":"中非法郎"},
+  "MXV": {"name":"Mexican Investment Unit (UDI)","country":"Mexico","cn":"墨西哥投资单位"}
+};
+
+// 应用状态
+let currencies = JSON.parse(localStorage.getItem("currencies")) || ["USD","PHP","CNY"];
+let ratesUSD = {}; // 存 USD -> XXX 的速率
+let lastConvertSeq = 0;
+
+// DOM
+const currencyContainer = document.getElementById("currencyContainer");
+const updatedTime = document.getElementById("updatedTime");
+const editPanel = document.getElementById("editPanel");
+const toggleEditBtn = document.getElementById("toggleEditBtn");
+const currencyListDiv = document.getElementById("currencyList");
+const suggestionsDiv = document.getElementById("suggestions");
+const searchInput = document.getElementById("searchCurrency");
+const saveBtn = document.getElementById("saveBtn");
+const closeEditBtn = document.getElementById("closeEdit");
+const resetBtn = document.getElementById("resetBtn");
+const statusHint = document.getElementById("statusHint");
+const clearSearchBtn = document.getElementById("clearSearch");
+
+// helper: 获取该币种的展示名称（优先中文短名）
+function metaDisplay(code){
+  const m = currencyMeta[code];
+  if(!m) return code;
+  return `${code} — ${m.cn || m.name} (${m.country})`;
+}
+
+// 刷新输入框区域
+function renderInputs(){
+  currencyContainer.innerHTML = "";
+  currencies.forEach(code => {
+    const div = document.createElement("div");
+    div.className = "input-group";
+    div.innerHTML = `
+      <label for="inp_${code}">${metaDisplay(code)}</label>
+      <input type="number" id="inp_${code}" placeholder="输入 ${code} 金额">
+    `;
+    currencyContainer.appendChild(div);
+    const inp = div.querySelector("input");
+    inp.addEventListener("input", async (e)=>{
+      await convert(code, e.target.value);
+    });
+  });
+}
+
+// 加载汇率（以 USD 为枢纽）
+async function loadAllRates(){
+  updatedTime.innerText = "加载汇率中…";
+  statusHint.innerText = "";
+  try {
+    // 以 USD 为基准获取其它币种
+    const unique = Array.from(new Set(currencies));
+    // 构建 to 列表时剔除 USD（因为 USD->USD=1）
+    const toList = unique.filter(c=>c!=="USD");
+    ratesUSD = {"USD":1};
+    if(toList.length>0){
+      const chunk = toList.join(",");
+      const resp = await fetch(`${API_BASE}?from=USD&to=${encodeURIComponent(chunk)}`);
+      const d = await resp.json();
+      // 填入数据
+      Object.keys(d.rates||{}).forEach(k=> ratesUSD[k]=d.rates[k]);
+      updatedTime.innerText = `汇率更新日期：${d.date||""}`;
+    } else {
+      updatedTime.innerText = `汇率基准：USD`;
+    }
+    // 对于依然缺失的币种（极少），尝试逐个拉取 USD->code
+    const missing = unique.filter(c=>!(c in ratesUSD));
+    for(const m of missing){
+      try{
+        const r2 = await fetch(`${API_BASE}?from=USD&to=${m}`);
+        const dd = await r2.json();
+        if(dd.rates && dd.rates[m]) ratesUSD[m]=dd.rates[m];
+      }catch(e){}
+    }
+    // 标记不支持的币种
+    const unsupported = unique.filter(c=>!(c in ratesUSD));
+    if(unsupported.length>0){
+      statusHint.innerText = "部分币种暂不被数据源支持：" + unsupported.join(", ");
+    } else {
+      statusHint.innerText = "";
+    }
+  } catch(err){
+    updatedTime.innerText = "无法加载汇率数据（网络或 API 问题）";
+    console.error(err);
+  }
+  renderInputs();
+}
+
+// 计算并填充其他输入框（用 USD 枢纽率）
+async function convert(from, amount){
+  lastConvertSeq++;
+  const seq = lastConvertSeq;
+  if(!amount || amount==0){
+    // 清空其他
+    currencies.forEach(c=>{ if(c!==from){ const el=document.getElementById("inp_"+c); if(el) el.value=""; }});
+    return;
+  }
+  // 尝试使用 pivot USD 来计算
+  for(const to of currencies){
+    if(to===from) continue;
+    let rate = null;
+    if(ratesUSD[from] !== undefined && ratesUSD[to] !== undefined){
+      // A -> B = (USD->B) / (USD->A)
+      rate = ratesUSD[to] / ratesUSD[from];
+    }
+    if(rate === null){
+      // 退回到 API 直接拉取 from->to
+      try {
+        const r = await fetch(`${API_BASE}?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+        const d = await r.json();
+        if(d && d.rates && d.rates[to]) rate = d.rates[to];
+      } catch(e){
+        console.warn("direct fetch failed", from, to, e);
+      }
+    }
+    // 在异步场景下，确保仍是最新一次请求
+    if(seq !== lastConvertSeq) return;
+    const el = document.getElementById("inp_"+to);
+    if(!el) continue;
+    if(rate !== null && rate !== undefined){
+      el.value = (parseFloat(amount) * rate).toFixed(2);
+    } else {
+      el.value = "";
+      el.placeholder = "— 无汇率";
+    }
+  }
+}
+
+// 编辑面板相关
+function toggleEditPanel(){
+  const showing = editPanel.style.display==="block";
+  editPanel.style.display = showing ? "none" : "block";
+  toggleEditBtn.innerText = showing ? "✏ 编辑币种" : "✖ 关闭编辑";
+  renderCurrencyList();
+  suggestionsDiv.innerHTML = "";
+  searchInput.value = "";
+}
+
+// 渲染当前币种列表（编辑面板）
+function renderCurrencyList(){
+  currencyListDiv.innerHTML = "";
+  currencies.forEach((c, idx)=>{
+    const row = document.createElement("div");
+    row.className = "currency-row";
+    row.innerHTML = `
+      <div style="display:flex;flex-direction:column;">
+        <strong>${metaDisplay(c)}</strong>
+        <span class="meta-small">代码：${c}</span>
+      </div>
+      <div>
+        <button onclick="removeCurrency(${idx})">删除</button>
+      </div>
+    `;
+    currencyListDiv.appendChild(row);
+  });
+}
+
+// 添加币种（在添加前会尝试检查 API 支持性）
+async function addCurrency(code){
+  code = code.trim().toUpperCase();
+  if(!code) return;
+  if(currencies.includes(code)){
+    alert(`${code} 已存在于列表`);
+    return;
+  }
+  // 先简单检测是否为常见币种（在本地 meta 中）
+  // 再尝试通过 API 检查支持性（USD->code）
+  let supported = false;
+  if(code === "USD") supported = true;
+  else {
+    try{
+      const r = await fetch(`${API_BASE}?from=USD&to=${encodeURIComponent(code)}`);
+      const d = await r.json();
+      if(d && d.rates && d.rates[code]) supported = true;
+    }catch(e){ supported = false; }
+  }
+  if(!supported){
+    const ok = confirm(`${code} 似乎暂不被数据源支持或输入有误。\n是否仍然添加（之后将无法显示汇率）？`);
+    if(!ok) return;
+  }
+  currencies.push(code);
+  renderCurrencyList();
+  renderInputs();
+  await loadAllRates();
+  // 自动保存到 localStorage，让用户下次无需重复操作
+  localStorage.setItem("currencies", JSON.stringify(currencies));
+  alert(`已添加 ${code}`);
+}
+
+// 删除币种
+function removeCurrency(index){
+  const code = currencies[index];
+  if(!confirm(`确认要删除 ${code} 吗？`)) return;
+  currencies.splice(index,1);
+  renderCurrencyList();
+  renderInputs();
+  localStorage.setItem("currencies", JSON.stringify(currencies));
+  loadAllRates();
+}
+
+// 搜索并显示建议（模糊匹配国家、货币名、代码）
+function renderSuggestions(q){
+  const query = (q||"").trim().toLowerCase();
+  suggestionsDiv.innerHTML = "";
+  if(!query) return;
+  const entries = Object.entries(currencyMeta);
+  const results = entries.filter(([code,meta])=>{
+    return code.toLowerCase().includes(query)
+      || (meta.name && meta.name.toLowerCase().includes(query))
+      || (meta.country && meta.country.toLowerCase().includes(query))
+      || (meta.cn && meta.cn.toLowerCase().includes(query));
+  }).slice(0,20);
+  if(results.length===0){
+    suggestionsDiv.innerHTML = `<div class="meta-small" style="padding:8px">未找到匹配项，可直接输入货币代码再尝试添加（例如 MXN、AED）。</div>`;
+    return;
+  }
+  results.forEach(([code,meta])=>{
+    const div = document.createElement("div");
+    div.className = "suggest-item";
+    const left = document.createElement("div");
+    left.innerHTML = `<div style="font-weight:600">${meta.country} — ${meta.cn || meta.name}</div><div class="meta-small">${code} · ${meta.name}</div>`;
+    const btn = document.createElement("button");
+    btn.className = "small-btn";
+    btn.innerText = currencies.includes(code) ? "已添加" : "添加";
+    btn.disabled = currencies.includes(code);
+    btn.onclick = (e)=>{ e.stopPropagation(); addCurrency(code); renderSuggestions(query); };
+    div.appendChild(left);
+    div.appendChild(btn);
+    div.onclick = ()=>{ if(!currencies.includes(code)) addCurrency(code); };
+    suggestionsDiv.appendChild(div);
+  });
+}
+
+// 存储设置并刷新汇率
+function saveSettings(){
+  localStorage.setItem("currencies", JSON.stringify(currencies));
+  loadAllRates();
+  toggleEditPanel();
+  alert("已保存设置");
+}
+
+// 恢复默认设置
+function resetToDefault(){
+  if(!confirm("恢复到默认三个币种：USD / PHP / CNY？")) return;
+  currencies = ["USD","PHP","CNY"];
+  localStorage.setItem("currencies", JSON.stringify(currencies));
+  loadAllRates();
+}
+
+// 事件绑定
+toggleEditBtn.addEventListener("click", toggleEditPanel);
+saveBtn.addEventListener("click", saveSettings);
+closeEditBtn.addEventListener("click", toggleEditPanel);
+resetBtn.addEventListener("click", resetToDefault);
+searchInput.addEventListener("input", (e)=> renderSuggestions(e.target.value));
+clearSearchBtn.addEventListener("click", ()=>{ searchInput.value=""; suggestionsDiv.innerHTML=""; searchInput.focus(); });
+
+// 初始加载
+renderInputs();
+loadAllRates();
+
+// 暴露用于 inline onclick 的函数
+window.addCurrency = addCurrency;
+window.removeCurrency = removeCurrency;
+</script>
+</body>
+</html>
