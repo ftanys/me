@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智能汇率换算器 (v2.3)</title>
+    <title>智能汇率换算器 (v2.4)</title>
     <style>
-        /* CSS样式部分与 v2.2 完全相同 */
+        /* CSS部分有新增和修改 */
         :root {
             --primary-color: #007aff; --background-color: #f0f2f5; --card-background: #ffffff;
             --text-color: #1d1d1f; --secondary-text-color: #6e6e73; --border-color: #dcdcdc;
@@ -28,13 +28,43 @@
             display: flex; align-items: center; margin-bottom: 1rem; position: relative;
         }
         .currency-label { flex-basis: 70px; font-size: 1.2rem; font-weight: 600; }
+        .input-wrapper { /* **新增**: 包裹输入框和清空按钮 */
+            position: relative;
+            display: flex;
+            flex-grow: 1;
+            align-items: center;
+        }
         .currency-input {
             flex-grow: 1; padding: 0.8rem; border: 1px solid var(--border-color); border-radius: 8px;
             font-size: 1.3rem; text-align: right; transition: border-color 0.2s, box-shadow 0.2s;
             -moz-appearance: textfield;
+            padding-right: 2.5rem; /* **修改**: 为清空按钮留出空间 */
         }
         .currency-input::-webkit-outer-spin-button, .currency-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         .currency-input:focus { outline: none; border-color: var(--primary-color); box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2); }
+        .clear-input-btn { /* **新增**: 清空按钮样式 */
+            position: absolute;
+            right: 0.5rem;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background-color: #ccc;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 24px;
+            text-align: center;
+            opacity: 0.7;
+            transition: opacity 0.2s, background-color 0.2s;
+            display: none; /* 默认隐藏 */
+        }
+        .clear-input-btn:hover { opacity: 1; background-color: #aaa; }
+        .input-wrapper:hover .clear-input-btn, .currency-input:focus + .clear-input-btn {
+             /* **新增**: 输入框有内容时，通过JS添加.has-content类来显示按钮 */
+        }
         .remove-btn {
             background: transparent; border: none; color: #ff453a; font-size: 1.5rem; cursor: pointer;
             padding: 0.5rem; margin-left: 0.5rem; line-height: 1; opacity: 0.5; transition: opacity 0.2s;
@@ -51,20 +81,33 @@
             cursor: pointer; transition: background-color 0.2s;
         }
         #add-btn:hover { background-color: #0056b3; }
-        #status-bar { /* **新增**: 用于包裹状态和版本号的容器 */
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-top: 1.5rem;
-            font-size: 0.85rem;
-            color: var(--secondary-text-color);
+        #status-bar {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-top: 1.5rem; font-size: 0.85rem; color: var(--secondary-text-color);
         }
+        #status-container { /* **新增**: 包裹刷新按钮和状态文本 */
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        #refresh-btn { /* **新增**: 刷新按钮样式 */
+            background: none; border: none; cursor: pointer; padding: 0;
+            width: 18px; height: 18px;
+            opacity: 0.6;
+            transition: opacity 0.2s, transform 0.5s;
+        }
+        #refresh-btn:hover { opacity: 1; }
+        #refresh-btn.loading { /* **新增**: 刷新中旋转动画 */
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @media (max-width: 420px) {
             body { padding: 1rem; }
             #converter { padding: 1.5rem 1rem; }
             h1 { font-size: 1.5rem; }
             .currency-row { flex-wrap: wrap; gap: 0.5rem 0; }
             .currency-label { flex-basis: 100%; margin-bottom: 0; }
+            .input-wrapper { flex-basis: 100%; } /* 让wrapper占满一行 */
             .currency-input { flex-grow: 1; flex-basis: 0; font-size: 1.2rem; }
             .remove-btn { margin-left: 0.5rem; }
             #add-currency-section { flex-wrap: wrap; }
@@ -82,17 +125,23 @@
             <select id="currency-select"></select>
             <button id="add-btn">添加</button>
         </div>
-        <!-- **修改**: 将p标签改为div容器，并添加版本号span -->
         <div id="status-bar">
-            <span id="status">正在初始化...</span>
-            <span id="version">v2.3</span>
+            <div id="status-container">
+                <!-- **新增**: 刷新按钮SVG图标 -->
+                <button id="refresh-btn" title="刷新汇率">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
+                        <path d="M463.5 224H472c13.3 0 24-10.7 24-24V72c0-9.7-5.8-18.5-14.8-22.2s-19.3-1.7-26.2 5.2L413.4 96.6c-87.6-86.5-228.7-86.2-315.8 1c-87.5 87.5-87.5 229.3 0 316.8s229.3 87.5 316.8 0c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0c-62.5 62.5-163.8 62.5-226.3 0s-62.5-163.8 0-226.3c62.2-62.2 162.7-62.5 225.3-1L327 183c-6.9 6.9-8.9 17.2-5.2 26.2s12.5 14.8 22.2 14.8H463.5z"/>
+                    </svg>
+                </button>
+                <span id="status">正在初始化...</span>
+            </div>
+            <span id="version">v2.4</span>
         </div>
     </div>
 </div>
 
 <script>
-// JavaScript部分与 v2.2 完全相同
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', ( ) => {
     const apiKey = "76d6e18a4eb48a506e34eb00";
     const apiUrl = `https://v6.exchangerate-api.com/v6/${apiKey}`;
 
@@ -100,6 +149,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusElem = document.getElementById('status');
     const currencySelect = document.getElementById('currency-select');
     const addBtn = document.getElementById('add-btn');
+    const refreshBtn = document.getElementById('refresh-btn'); // **新增**: 获取刷新按钮
 
     let rates = {};
     let supportedCodes = [];
@@ -119,9 +169,13 @@ document.addEventListener('DOMContentLoaded', () => {
         activeCurrencies.forEach(code => {
             const row = document.createElement('div');
             row.className = 'currency-row';
+            // **修改**: HTML结构增加 .input-wrapper 和 .clear-input-btn
             row.innerHTML = `
                 <label class="currency-label">${code}</label>
-                <input type="number" class="currency-input" data-currency="${code}" placeholder="0.00">
+                <div class="input-wrapper">
+                    <input type="number" class="currency-input" data-currency="${code}" placeholder="0.00">
+                    <button class="clear-input-btn" title="清空">&times;</button>
+                </div>
                 <button class="remove-btn" data-currency="${code}">&times;</button>
             `;
             container.appendChild(row);
@@ -147,17 +201,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const sourceCurrency = sourceInput.dataset.currency;
         const sourceValue = parseFloat(sourceInput.value);
-        const allInputs = container.querySelectorAll('.currency-input');
+        
+        // **新增**: 控制清空按钮的显示/隐藏
+        const clearBtn = sourceInput.nextElementSibling;
+        if (sourceInput.value) {
+            clearBtn.style.display = 'block';
+        } else {
+            clearBtn.style.display = 'none';
+        }
 
+        const allInputs = container.querySelectorAll('.currency-input');
         if (isNaN(sourceValue) || sourceValue === 0) {
             allInputs.forEach(input => {
-                if (input !== sourceInput) input.value = '';
+                if (input !== sourceInput) {
+                    input.value = '';
+                    input.nextElementSibling.style.display = 'none'; // 隐藏其他清空按钮
+                }
             });
             return;
         }
 
         if (!rates[sourceCurrency]) return;
-
         const baseValue = sourceValue / rates[sourceCurrency];
 
         allInputs.forEach(input => {
@@ -165,6 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const targetCurrency = input.dataset.currency;
                 const targetValue = baseValue * rates[targetCurrency];
                 input.value = targetValue.toFixed(2);
+                input.nextElementSibling.style.display = 'block'; // 显示其他清空按钮
             }
         });
     }
@@ -187,38 +252,77 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // **新增**: 处理清空按钮的点击
+    function handleClearInput(event) {
+        if (event.target.classList.contains('clear-input-btn')) {
+            const allInputs = container.querySelectorAll('.currency-input');
+            allInputs.forEach(input => {
+                input.value = '';
+                input.nextElementSibling.style.display = 'none';
+            });
+        }
+    }
+
     async function init() {
-        loadActiveCurrencies();
-        renderConverter();
+        refreshBtn.classList.add('loading'); // 开始加载时添加旋转动画
+        statusElem.textContent = '正在加载汇率数据...';
         try {
-            statusElem.textContent = '正在加载汇率数据...';
+            const codesPromise = fetch(`${apiUrl}/codes`).then(res => res.json());
+            const ratesPromise = fetch(`${apiUrl}/latest/USD`).then(res => res.json());
+
+            const [codesData, ratesData] = await Promise.all([codesPromise, ratesPromise]);
             
-            const codesResponse = await fetch(`${apiUrl}/codes`);
-            const codesData = await codesResponse.json();
             if (codesData.result === 'error') throw new Error(codesData['error-type']);
             supportedCodes = codesData.supported_codes;
 
-            const ratesResponse = await fetch(`${apiUrl}/latest/USD`);
-            const ratesData = await ratesResponse.json();
             if (ratesData.result === 'error') throw new Error(ratesData['error-type']);
-            
             rates = ratesData.conversion_rates;
+            
             const updateTime = new Date(ratesData.time_last_update_utc).toLocaleString();
             statusElem.textContent = `汇率更新于: ${updateTime}`;
             
             updateSelectOptions();
-
         } catch (error) {
             console.error("初始化失败:", error);
             statusElem.textContent = `加载失败: ${error.message}。`;
             statusElem.style.color = 'red';
+        } finally {
+            refreshBtn.classList.remove('loading'); // 结束加载时移除旋转动画
         }
     }
-
-    container.addEventListener('input', handleInput);
-    container.addEventListener('click', handleRemoveCurrency);
-    addBtn.addEventListener('click', handleAddCurrency);
     
+    // **修改**: 增加对清空按钮的监听
+    container.addEventListener('click', (event) => {
+        handleRemoveCurrency(event);
+        handleClearInput(event);
+    });
+    container.addEventListener('input', handleInput);
+    addBtn.addEventListener('click', handleAddCurrency);
+    refreshBtn.addEventListener('click', () => { // **新增**: 刷新按钮的监听
+        // 重新加载数据，但不重新加载已选货币列表
+        const loadRatesOnly = async () => {
+            refreshBtn.classList.add('loading');
+            statusElem.textContent = '正在刷新...';
+            try {
+                const ratesResponse = await fetch(`${apiUrl}/latest/USD`);
+                const ratesData = await ratesResponse.json();
+                if (ratesData.result === 'error') throw new Error(ratesData['error-type']);
+                rates = ratesData.conversion_rates;
+                const updateTime = new Date(ratesData.time_last_update_utc).toLocaleString();
+                statusElem.textContent = `汇率更新于: ${updateTime}`;
+            } catch (error) {
+                statusElem.textContent = `刷新失败: ${error.message}。`;
+                statusElem.style.color = 'red';
+            } finally {
+                refreshBtn.classList.remove('loading');
+            }
+        };
+        loadRatesOnly();
+    });
+    
+    // 首次加载
+    loadActiveCurrencies();
+    renderConverter();
     init();
 });
 </script>
